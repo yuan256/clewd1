@@ -7,19 +7,22 @@
 const {createServer: Server, IncomingMessage, ServerResponse} = require('node:http'), {createHash: Hash, randomUUID, randomInt, randomBytes} = require('node:crypto'), {TransformStream, ReadableStream} = require('node:stream/web'), {Readable, Writable} = require('node:stream'), {Blob} = require('node:buffer'), {existsSync: exists, writeFileSync: write, createWriteStream} = require('node:fs'), {join: joinP} = require('node:path'), {ClewdSuperfetch: Superfetch, SuperfetchAvailable} = require('./lib/clewd-superfetch'), {AI, fileName, genericFixes, bytesToSize, setTitle, checkResErr, Replacements, Main} = require('./lib/clewd-utils'), ClewdStream = require('./lib/clewd-stream');
 
 /******************************************************* */
-let currentIndex, Firstlogin = true, changeflag = 0, changetime = 0, totaltime, uuidOrgArray = [], model, tokens, apiKey;
+let currentIndex, Firstlogin = true, changeflag = 0, changetime = 0, totaltime, uuidOrgArray = [], model, tokens, apiKey, timestamp = Date.now();
 
 const events = require('events'), CookieChanger = new events.EventEmitter();
 require('events').EventEmitter.defaultMaxListeners = 0;
 
 CookieChanger.on('ChangeCookie', () => {
-    changeflag = 0;
-    Proxy && Proxy.close();
-    console.log(`Changing Cookie...\n`);
-    Proxy.listen(Config.Port, Config.Ip, onListen);
-    Proxy.on('error', (err => {
-        console.error('Proxy error\n%o', err);
-    }));
+    setTimeout(() => {
+        changeflag = 0;
+        Proxy && Proxy.close();
+        console.log(`Changing Cookie...\n`);
+        Proxy.listen(Config.Port, Config.Ip, onListen);
+        Proxy.on('error', (err => {
+            console.error('Proxy error\n%o', err);
+        }));
+        timestamp = Date.now();
+    }, !Config.rProxy || Config.rProxy === AI.end() ? 15000 + timestamp - Date.now() : 0);
 });
 
 const convertToType = value => {
@@ -37,10 +40,10 @@ const convertToType = value => {
     const placeholder = Config.padtxt_placeholder || randomBytes(randomInt(5, 15)).toString('hex');
     tokens = countTokens(content);
     const padding = placeholder.repeat(Math.floor(Math.max(1000, Config.Settings.padtxt - tokens) / countTokens(placeholder.trim())));
-    content = content.includes('<|padtxt|>') ? content.replace(/<\|padtxt\|>/, padding) : !apiKey ? padding + '\n\n\n' + content.trim() : content;
+    content = content.includes('<|padtxt|>') ? content.replace(/<\|padtxt\|>/gm, padding) : !apiKey ? padding + '\n\n\n' + content.trim() : content;
     return content;
 }, xmlPlot = (content, nonsys = false) => {
-    const card = content.includes('<card>') || content.includes('<|card|>');
+    const card = /<\|?card\|?>/.test(content);
     //role合并
     const MergeDisable = content.includes('<|Merge Disable|>');
     const MergeHumanDisable = content.includes('<|Merge Human Disable|>');
@@ -138,7 +141,7 @@ let uuidOrg, curPrompt = {}, prevPrompt = {}, prevMessages = [], prevImpersonate
     localtunnel: false,
     BufferSize: 1,
     SystemInterval: 3,
-    rProxy: AI.end(),
+    rProxy: '',
     api_rProxy: '',
     padtxt_placeholder: '',
     PromptExperimentFirst: '',
@@ -208,7 +211,7 @@ const updateParams = res => {
         return;
     }
     try { //
-        const res = await fetch(`${Config.rProxy}/api/organizations/${uuidOrg}/chat_conversations/${uuid}`, {
+        const res = await fetch(`${Config.rProxy || AI.end()}/api/organizations/${uuidOrg}/chat_conversations/${uuid}`, {
             headers: {
                 ...AI.hdr(),
                 Cookie: getCookies()
@@ -250,7 +253,7 @@ const updateParams = res => {
     updateCookies(Config.Cookie.replace(/^(sessionKey=)?/, 'sessionKey=')); //updateCookies(Config.Cookie);
     //console.log(`[2m${Main}[0m\n[33mhttp://${Config.Ip}:${Config.Port}/v1[0m\n\n${Object.keys(Config.Settings).map((setting => UnknownSettings.includes(setting) ? `??? [31m${setting}: ${Config.Settings[setting]}[0m` : `[1m${setting}:[0m ${ChangedSettings.includes(setting) ? '[33m' : '[36m'}${Config.Settings[setting]}[0m`)).sort().join('\n')}\n`);
     //Config.Settings.Superfetch && SuperfetchAvailable(true);
-    const accRes = await fetch(Config.rProxy + '/api/organizations', {
+    const accRes = await fetch((Config.rProxy || AI.end()) + '/api/organizations', {
         method: 'GET',
         headers: {
             ...AI.hdr(),
@@ -276,7 +279,7 @@ const updateParams = res => {
     setTitle('ok');
     updateParams(accRes);
 /**************************** */
-    const accountRes = await fetch(Config.rProxy + '/api/auth/current_account', {
+    const accountRes = await fetch((Config.rProxy || AI.end()) + '/api/auth/current_account', {
         method: 'GET',
         headers: {
             ...AI.hdr(),
@@ -335,7 +338,7 @@ const updateParams = res => {
             if ('consumer_restricted_mode' === type || 'consumer_banned' === type) { //if ('consumer_restricted_mode' === type) {
                 return;
             }
-            const req = await (Config.Settings.Superfetch ? Superfetch : fetch)(`${Config.rProxy}/api/organizations/${uuidOrg}/flags/${type}/dismiss`, {
+            const req = await (Config.Settings.Superfetch ? Superfetch : fetch)(`${Config.rProxy || AI.end()}/api/organizations/${uuidOrg}/flags/${type}/dismiss`, {
                 headers: {
                     ...AI.hdr(),
                     Cookie: getCookies()
@@ -359,7 +362,7 @@ const updateParams = res => {
         return CookieChanger.emit('ChangeCookie');
 /***************************** */
     }
-    const convRes = await fetch(`${Config.rProxy}/api/organizations/${uuidOrg}/chat_conversations`, {
+    const convRes = await fetch(`${Config.rProxy || AI.end()}/api/organizations/${uuidOrg}/chat_conversations`, {
         method: 'GET',
         headers: {
             ...AI.hdr(),
@@ -429,13 +432,14 @@ const updateParams = res => {
                     const body = JSON.parse(Buffer.concat(buffer).toString()), temperature = Math.max(.1, Math.min(1, body.temperature));
                     let {messages} = body;
 /************************* */
-                    apiKey = /(?<=^Bearer \s*)sk-ant-api[\w-]*(?=\s*)$/.exec(req.headers.authorization);
-                    let api_max_tokens, api_model;
+                    apiKey = req.headers.authorization?.match(/sk-ant-api\d\d-[\w-]{86}-[\w-]{6}AA/g);
+                    let max_tokens_to_sample;
                     if (apiKey) {
-                        apiKey = apiKey[0];
-                        api_max_tokens = body.max_tokens;
-                        api_model = body.model;
-                        if (!api_model.includes('claude')) throw Error('Please change to claude model in "External"');
+                        max_tokens_to_sample = body.max_tokens;
+                        model = body.model;
+                        if (!model.includes('claude')) throw Error('Please change to claude model in "External"');
+                    } else if (req.headers.authorization.includes('sk-ant-api')) {
+                        throw Error('apiKey Wrong');
                     } else if (Config.ProxyPassword != '' && req.headers.authorization != 'Bearer ' + Config.ProxyPassword) {
                         throw Error('ProxyPassword Wrong');
                     }
@@ -518,7 +522,7 @@ const updateParams = res => {
                                 const names = Object.keys(headers), values = Object.values(headers);
                                 headers = names.map(((header, idx) => `${header}: ${values[idx]}`));
                             }
-                            res = await (Config.Settings.Superfetch ? Superfetch : fetch)(Config.rProxy + '/api/retry_message', {
+                            res = await (Config.Settings.Superfetch ? Superfetch : fetch)((Config.rProxy || AI.end()) + '/api/retry_message', {
                                 stream: true,
                                 signal,
                                 method: 'POST',
@@ -534,7 +538,7 @@ const updateParams = res => {
                         fetchAPI = await (async signal => {
                             Conversation.uuid = randomUUID().toString();
                             Conversation.depth = 0;
-                            const res = await (Config.Settings.Superfetch ? Superfetch : fetch)(`${Config.rProxy}/api/organizations/${uuidOrg}/chat_conversations`, {
+                            const res = await (Config.Settings.Superfetch ? Superfetch : fetch)(`${Config.rProxy || AI.end()}/api/organizations/${uuidOrg}/chat_conversations`, {
                                 signal,
                                 headers: {
                                     ...AI.hdr(),
@@ -657,16 +661,16 @@ const updateParams = res => {
                             systems
                         };
                     })(messages, type);
-                    console.log(`${apiKey ? api_model : model} [[2m${type}[0m]${!retryRegen && systems.length > 0 ? ' ' + systems.join(' [33m/[0m ') : ''}`); //console.log(`${model} [[2m${type}[0m]${!retryRegen && systems.length > 0 ? ' ' + systems.join(' [33m/[0m ') : ''}`);
+                    console.log(`${model} [[2m${type}[0m]${!retryRegen && systems.length > 0 ? ' ' + systems.join(' [33m/[0m ') : ''}`); //console.log(`${model} [[2m${type}[0m]${!retryRegen && systems.length > 0 ? ' ' + systems.join(' [33m/[0m ') : ''}`);
                     'R' !== type || prompt || (prompt = '...regen...');
 /******************************** */
-                    prompt = Config.Settings.xmlPlot ? xmlPlot(prompt, api_model && api_model != 'claude-2.1') : apiKey ? `\n\nHuman: ${genericFixes(prompt)}\n\nAssistant: ` : genericFixes(prompt);
+                    prompt = Config.Settings.xmlPlot ? xmlPlot(prompt, model != AI.mdl()) : apiKey ? `\n\nHuman: ${genericFixes(prompt)}\n\nAssistant: ` : genericFixes(prompt);
                     Config.Settings.FullColon && (prompt = apiKey
                         ? prompt.replace(/(\n\nAssistant|\n\nHuman):/, function(match, p1) {return p1 === '\n\nHuman' ? match : p1 + '：'}).replace(/(\n\nAssistant|\n\nHuman):(?!.*?\n\n(Assistant|Human):)/s, function(match, p1) {return p1 === '\n\nAssistant' ? match : p1 + '：'})
                         : prompt.replace(/(?<=\n\n(H(?:uman)?|A(?:ssistant)?)):[ ]?/g, '： '));
                     Config.Settings.padtxt && (prompt = padtxt(prompt));
 /******************************** */
-                    Logger?.write(`\n\n-------\n[${(new Date).toLocaleString()}]\n####### ${apiKey ? api_model : model} PROMPT (${type}):\n${prompt}\n--\n####### [Tokens: ${tokens}] REPLY:\n`); //Logger?.write(`\n\n-------\n[${(new Date).toLocaleString()}]\n####### PROMPT (${type}):\n${prompt}\n--\n####### REPLY:\n`);
+                    Logger?.write(`\n\n-------\n[${(new Date).toLocaleString()}]\n####### ${model} (${type}) ${tokens}t PROMPT:\n${prompt}\n--\n####### REPLY:\n`); //Logger?.write(`\n\n-------\n[${(new Date).toLocaleString()}]\n####### PROMPT (${type}):\n${prompt}\n--\n####### REPLY:\n`);
                     retryRegen || (fetchAPI = await (async (signal, model, prompt, temperature, type) => {
 /******************************** */
                         if (apiKey) {
@@ -675,12 +679,12 @@ const updateParams = res => {
                                 signal,
                                 headers: {
                                     'Content-Type': 'application/json',
-                                    'x-api-key': apiKey,
+                                    'x-api-key': apiKey[Math.floor(Math.random() * apiKey.length)],
                                     'anthropic-version': '2023-06-01'
                                 },
                                 body: JSON.stringify({
-                                    model: api_model,
-                                    max_tokens_to_sample: api_max_tokens,
+                                    model,
+                                    max_tokens_to_sample,
                                     stream: true,
                                     prompt,
                                     temperature
@@ -723,7 +727,7 @@ const updateParams = res => {
                             Accept: 'text/event-stream',
                             Cookie: getCookies()
                         };
-                        res = await (Config.Settings.Superfetch ? Superfetch : fetch)(Config.rProxy + '/api/append_message', {
+                        res = await (Config.Settings.Superfetch ? Superfetch : fetch)((Config.rProxy || AI.end()) + '/api/append_message', {
                             stream: true,
                             signal,
                             method: 'POST',
@@ -779,7 +783,7 @@ const updateParams = res => {
                     await deleteChat(Conversation.uuid);
 /******************************** */
                     changeflag += 1;
-                    if (Config.CookieArray?.length > 0 && (429 == fetchAPI?.status || Config.Cookiecounter && changeflag >= Config.Cookiecounter)) {
+                    if (Config.CookieArray?.length > 0 && (429 == fetchAPI?.status || Config.Cookiecounter > 0 && changeflag >= Config.Cookiecounter)) {
                         changeflag = 0;
                         CookieChanger.emit('ChangeCookie');
                     }
@@ -856,7 +860,7 @@ const updateParams = res => {
             Config[key] = process.env[key] ? convertToType(process.env[key]) : Config[key];
         }
     }
-    Config.rProxy = Config.rProxy ? Config.rProxy.replace(/\/$/, '') : AI.end();
+    Config.rProxy = Config.rProxy.replace(/\/$/, '');
     Config.CookieArray = [...new Set([Config.CookieArray].join('').match(/(sessionKey=)?sk-ant-sid01-[\w-]{86}-[\w-]{6}AA/g))];
     writeSettings(Config);
     currentIndex = Config.CookieIndex > 0 ? Config.CookieIndex - 1 : Config.Cookiecounter >= 0 ? Math.floor(Math.random() * Config.CookieArray.length) : 0;
